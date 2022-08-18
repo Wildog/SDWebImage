@@ -11,6 +11,12 @@
 #import "UIColor+SDHexString.h"
 #import <SDWebImageWebPCoder/SDWebImageWebPCoder.h>
 
+@interface SDImageIOCoder ()
+
++ (CGRect)boxRectFromPDFFData:(nonnull NSData *)data;
+
+@end
+
 @interface SDWebImageDecoderTests : SDTestCase
 
 @end
@@ -341,6 +347,55 @@
     }
 }
 
+- (void)test22ThatThumbnailDecodeCalculation {
+    NSString *testImagePath = [[NSBundle bundleForClass:[self class]] pathForResource:@"TestImageLarge" ofType:@"jpg"];
+    NSData *testImageData = [NSData dataWithContentsOfFile:testImagePath];
+    CGSize thumbnailSize = CGSizeMake(400, 300);
+    UIImage *image = [SDImageIOCoder.sharedCoder decodedImageWithData:testImageData options:@{
+        SDImageCoderDecodePreserveAspectRatio: @(YES),
+        SDImageCoderDecodeThumbnailPixelSize: @(thumbnailSize)}];
+    CGSize imageSize = image.size;
+    expect(imageSize.width).equal(400);
+    expect(imageSize.height).equal(263);
+}
+
+- (void)test23ThatThumbnailEncodeCalculation {
+    NSString *testImagePath = [[NSBundle bundleForClass:[self class]] pathForResource:@"TestImageLarge" ofType:@"jpg"];
+    NSData *testImageData = [NSData dataWithContentsOfFile:testImagePath];
+    UIImage *image = [SDImageIOCoder.sharedCoder decodedImageWithData:testImageData options:nil];
+    expect(image.size).equal(CGSizeMake(5250, 3450));
+    CGSize thumbnailSize = CGSizeMake(4000, 4000); // 3450 < 4000 < 5250
+    NSData *encodedData = [SDImageIOCoder.sharedCoder encodedDataWithImage:image format:SDImageFormatJPEG options:@{
+            SDImageCoderEncodeMaxPixelSize: @(thumbnailSize)
+    }];
+    UIImage *encodedImage = [UIImage sd_imageWithData:encodedData];
+    expect(encodedImage.size).equal(CGSizeMake(4000, 2629));
+}
+
+- (void)test24ThatScaleSizeCalculation {
+    // preserveAspectRatio true
+    CGSize size1 = [SDImageCoderHelper scaledSizeWithImageSize:CGSizeMake(100, 200) scaleSize:CGSizeMake(150, 150) preserveAspectRatio:YES shouldScaleUp:NO];
+    expect(size1).equal(CGSizeMake(75, 150));
+    CGSize size2 = [SDImageCoderHelper scaledSizeWithImageSize:CGSizeMake(100, 200) scaleSize:CGSizeMake(150, 150) preserveAspectRatio:YES shouldScaleUp:YES];
+    expect(size2).equal(CGSizeMake(75, 150));
+    CGSize size3 = [SDImageCoderHelper scaledSizeWithImageSize:CGSizeMake(100, 200) scaleSize:CGSizeMake(300, 300) preserveAspectRatio:YES shouldScaleUp:NO];
+    expect(size3).equal(CGSizeMake(100, 200));
+    CGSize size4 = [SDImageCoderHelper scaledSizeWithImageSize:CGSizeMake(100, 200) scaleSize:CGSizeMake(300, 300) preserveAspectRatio:YES shouldScaleUp:YES];
+    expect(size4).equal(CGSizeMake(150, 300));
+    
+    // preserveAspectRatio false
+    CGSize size5 = [SDImageCoderHelper scaledSizeWithImageSize:CGSizeMake(100, 200) scaleSize:CGSizeMake(150, 150) preserveAspectRatio:NO shouldScaleUp:NO];
+    expect(size5).equal(CGSizeMake(100, 150));
+    CGSize size6 = [SDImageCoderHelper scaledSizeWithImageSize:CGSizeMake(100, 200) scaleSize:CGSizeMake(150, 150) preserveAspectRatio:NO shouldScaleUp:YES];
+    expect(size6).equal(CGSizeMake(150, 150));
+    
+    // 0 value
+    CGSize size7 = [SDImageCoderHelper scaledSizeWithImageSize:CGSizeMake(0, 0) scaleSize:CGSizeMake(999, 999) preserveAspectRatio:NO shouldScaleUp:NO];
+    expect(size7).equal(CGSizeMake(0, 0));
+    CGSize size8 = [SDImageCoderHelper scaledSizeWithImageSize:CGSizeMake(999, 999) scaleSize:CGSizeMake(0, 0) preserveAspectRatio:NO shouldScaleUp:NO];
+    expect(size8).equal(CGSizeMake(999, 999));
+}
+
 #pragma mark - Utils
 
 - (void)verifyCoder:(id<SDImageCoder>)coder
@@ -388,15 +443,14 @@ withLocalImageURL:(NSURL *)imageUrl
     CGFloat pixelHeight = inputImage.size.height;
     expect(pixelWidth).beGreaterThan(0);
     expect(pixelHeight).beGreaterThan(0);
-    // check vector format supports thumbnail with screen size
+    // check vector format should use 72 DPI
     if (isVector) {
-#if SD_UIKIT
-        CGFloat maxScreenSize = MAX(UIScreen.mainScreen.bounds.size.width, UIScreen.mainScreen.bounds.size.height);
-#else
-        CGFloat maxScreenSize = MAX(NSScreen.mainScreen.frame.size.width, NSScreen.mainScreen.frame.size.height);
-#endif
-        expect(pixelWidth).equal(maxScreenSize);
-        expect(pixelHeight).equal(maxScreenSize);
+        CGRect boxRect = [SDImageIOCoder boxRectFromPDFFData:inputImageData];
+        expect(boxRect.size.width).beGreaterThan(0);
+        expect(boxRect.size.height).beGreaterThan(0);
+        // Since 72 DPI is 1:1 from inch size to pixel size
+        expect(boxRect.size.width).equal(pixelWidth);
+        expect(boxRect.size.height).equal(pixelHeight);
     }
     
     // check thumbnail with scratch
